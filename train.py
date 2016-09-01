@@ -39,3 +39,41 @@ def rollout(N, agent, env):
 
     return trajectories
 
+def agent_cor(agent):
+   
+    state = yield
+    
+    try:
+        while True:
+            aprob, action = agent.act(state)
+            next_state = yield action            
+            state = next_state
+    except GeneratorExit, StopIteration:
+        print "Simulation Finished"
+    else:
+        raise
+        
+def simulate(agent, env):
+    states, actions, rewards = [], [], []
+    
+    acor = agent_cor(agent)
+    next(acor) #prime 
+     
+    state = init_state = env.reset()
+    action = init_action = acor.send(init_state)
+    states.append(state)
+    actions.append(action)
+    done = False
+
+    while not done:       
+        next_state, reward, done, info = env.step(action)          
+        rewards.append(reward)
+        
+        state = next_state
+        action = acor.send(state)    
+        states.append(state)
+        actions.append(action)
+        
+    acor.close()
+    
+    return map(np.array, [states, actions, rewards])

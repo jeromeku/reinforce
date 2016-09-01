@@ -66,9 +66,17 @@ class PGAgent(PongAgent):
             self.action_logits, self.action_probs = self.action_net
 
     def act(self, state):
+ #       return (1, np.random.choice([2,3], size=1)[0])
         state = self._preprocess(state)
         if len(state.shape) == 1:
             state = state.reshape((1, self.state_dim))
         action_probs = self.action_probs.eval(session=self.sess, feed_dict={self.states: state})
         action = np.argmax(action_probs) + 2 #map to discrete state 2 (up) or 3 (down)
         return action_probs, action
+
+    def interact(self, state, reward):
+        '''Coroutine for interacting with environment.  Receives state and reward, sends action
+        '''
+        while True:
+            x = yield
+            yield x

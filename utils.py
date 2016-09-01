@@ -79,6 +79,7 @@ def normalize(r):
     r -= np.mean(r)
     r /= np.std(r)
     return r
+    
 def wrap_graph(g):
     '''Decorator for adding ops to a graph'''
     def wrapper(f):

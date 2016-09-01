@@ -1,3 +1,4 @@
+import numpy as np
 import matplotlib.pyplot as plt
 from functools import wraps
 
@@ -8,6 +9,15 @@ def display(state, preprocessor=None):
         state = preprocessor(state).reshape(80,80)
 
     plt.imshow(state, cmap=plt.cm.Greys_r)
+
+def trajectory_dx(states, actions, rewards):
+    print "Total actions: {}".format(len(actions))
+    print "Total reward: {}".format(np.sum(rewards))
+    
+    print "# of Up moves: {}".format(np.sum(actions == 2))
+    print "# of Down moves: {}".format(np.sum(actions == 3))
+    print "# of positive rewards {}".format(np.sum(rewards > 0))
+    print "# of negative rewards {}".format(np.sum(rewards < 0))
 
 def play(env, agent):
     state = env.reset()

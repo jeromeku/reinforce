@@ -71,4 +71,4 @@ class PGAgent(PongAgent):
             state = state.reshape((1, self.state_dim))
         action_probs = self.action_probs.eval(session=self.sess, feed_dict={self.states: state})
         action = np.argmax(action_probs) + 2 #map to discrete state 2 (up) or 3 (down)
-        return action_probs, actio
+        return action_probs, action

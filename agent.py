@@ -15,9 +15,8 @@ class RandomPolicy(Policy):
 
 class PongAgent(object):
 
-    VALID_ACTIONS = [2,3]
-
     def __init__(self):
+        self.VALID_ACTIONS = [2,3]
         pass
 
     def _preprocess(self, I):
@@ -29,15 +28,30 @@ class PongAgent(object):
 
         return I.astype(np.float).ravel()
 
+    def random_policy(self, state):
+        a = np.random.choice(self.VALID_ACTIONS, size=1)[0]
+        if a == 2:
+            aprob = [1., 0.]
+        else:
+            aprob = [0., 1.]
+
+        return aprob, a
+
     def act(self, state):
         raise NotImplementedError
 
 
 class RandomAgent(PongAgent):
     def act(self, state):
-        action = np.random.choice(PongAgent.VALID_ACTIONS, size=1)[0]
-        return action
+        a = np.random.choice(self.VALID_ACTIONS, size=1)[0]
 
+        if a == 2:
+            aprob = [1., 0.]
+        else:
+            aprob = [0., 1.]
+
+        return aprob, a
+        
 class PGAgent(PongAgent):
     
     def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params):
@@ -77,17 +91,9 @@ class PGAgent(PongAgent):
             self.action_logits, self.action_probs = self.action_net
 
     def act(self, state):
- #       return (1, np.random.choice([2,3], size=1)[0])
         state = self._preprocess(state)
         if len(state.shape) == 1:
             state = state.reshape((1, self.state_dim))
         action_probs = self.action_probs.eval(session=self.sess, feed_dict={self.states: state})
         action = np.argmax(action_probs) + 2 #map to discrete state 2 (up) or 3 (down)
         return action_probs, action
-
-    def interact(self, state, reward):
-        '''Coroutine for interacting with environment.  Receives state and reward, sends action
-        '''
-        while True:
-            x = yield
-            yield x

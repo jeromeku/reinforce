@@ -2,6 +2,17 @@ import numpy as np
 import tensorflow as tf
 from utils import wrap_graph_c as wrap_graph
 
+class Policy(object):
+    def __init__(self):
+        pass
+
+class RandomPolicy(Policy):
+    def __init__(self, action_space):
+        self.action_space = action_space
+
+    def act(self, state):
+        return np.random.choice(self.action_space, size=1)[0]
+
 class PongAgent(object):
 
     VALID_ACTIONS = [2,3]

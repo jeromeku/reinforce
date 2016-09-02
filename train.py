@@ -8,20 +8,30 @@ from agent import PGAgent
 
 
 def run_trajectory(agent, env):
-    states, actions, rewards = [], [], []
+    states, action_probs, actions, rewards = [], [], [], []
+
+    #Start the simulation, get initial state
     state = env.reset()
+    states.append(state)
+
+    #Agent's response to initial state
+    aprob, a = agent.act(state)
+    actions.append(a)
+
     done = False
 
     while not done:
-        _, a = agent.act(state)
-        
+        #Advance simulation wrt agent action and record reward
         next_state, reward, done, info = env.step(a)
-
-        states.append(state)
-        actions.append(a)
         rewards.append(reward)
 
+        #Update and record state
         state = next_state
+        states.append(state)        
+        
+        #Agent response to new state
+        aprob, a = agent.act(state)
+        actions.append(a)
 
     return [np.array(l) for l in [states, actions, rewards]]
 
@@ -37,6 +47,9 @@ def rollout(N, agent, env):
         trajectories['actions'].append(actions)
         trajectories['rewards'].append(rewards)
 
+    for k,v in trajectories.iteritem():
+        trajectories[k] = np.vstack(v)
+        
     return trajectories
 
 def agent_cor(agent):

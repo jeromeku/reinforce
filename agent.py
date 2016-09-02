@@ -3,6 +3,8 @@ import numpy as np
 from collections import deque
 
 import tensorflow as tf
+from toolz import accumulate
+
 from utils import wrap_graph_c as wrap_graph
 
 class Policy(object):
@@ -25,7 +27,6 @@ class PongAgent(object):
         self._state_buffer = deque(maxlen=self.MAX_LEN)
         self._action_buffer = deque(maxlen=self.MAX_LEN)
         self._reward_buffer = deque(maxlen=self.MAX_LEN)
-        #self._experience_buffer = deque(maxlen=self.MAX_LEN)
 
     def _preprocess(self, I):
         I = I[35:195] # crop
@@ -36,15 +37,6 @@ class PongAgent(object):
 
         return I.astype(np.float).ravel()
 
-    def random_policy(self, state):
-        a = np.random.choice(self.VALID_ACTIONS, size=1)[0]
-        if a == 2:
-            aprob = [1., 0.]
-        else:
-            aprob = [0., 1.]
-
-        return aprob, a
-
     def act(self, state):
         raise NotImplementedError
 
@@ -52,6 +44,26 @@ class PongAgent(object):
     def num_episodes(self):
         assert len(self._state_buffer) == len(self._action_buffer) == len(self._reward_buffer)
         return len(self._state_buffer)
+
+    def discount(self, rs, discount_rate):
+        discounted = accumulate(lambda prev, curr: discount_rate * prev + curr, reversed(rs))
+        return np.fromiter(discounted,'float')[::-1]
+
+    def partition_rewards(self, rewards):
+        '''Partition episode of rewards into list of iterables where each sequence ends when reward != 0
+        
+        Returns:
+            list of lists: each list is a reward sequence within the episode
+        '''
+        rewards = np.array(rewards)
+        bounds = np.zeros(np.count_nonzero(rewards) + 1, dtype=int)
+        bounds[1:] = np.argwhere(rewards).ravel() + 1
+        return [rewards[bounds[i]:bounds[i+1]] for i in range(len(bounds) - 1)]
+
+    def discount_rewards(self, rewards, discount_rate):
+        rewards = self.partition_rewards(rewards)
+        discounted_seqs = [self.discount(rs, discount_rate) for rs in rewards]
+        return np.concatenate(discounted_seqs).reshape((-1,1)).ravel()
 
 class RandomAgent(PongAgent):
     def act(self, state):
@@ -66,11 +78,12 @@ class RandomAgent(PongAgent):
         
 class PGAgent(PongAgent):
     
-    def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params):
+    def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params, gamma=.99):
         super(PGAgent, self).__init__()
         
         self.state_dim = state_dim
-        
+        self.gamma = gamma #rate at which to discount rewards
+
         assert sess.graph == g
         self.g = g
         self.sess = sess
@@ -91,13 +104,50 @@ class PGAgent(PongAgent):
     def _create_variables(self):
         with tf.name_scope("inputs"):
             self.states = tf.placeholder(tf.float32, (None, self.state_dim), name="states")
-            self.test_var = tf.Variable(initial_value=1.0, name="test_var")
-
+            self.labels = tf.placeholder(tf.int32, shape=[None], name="labels")
+            self.rewards = tf.placeholder(tf.float32, shape=[None], name="rewards")
     @wrap_graph
     def _build_action_network(self, action_net_ctor, ctor_params):
         with tf.variable_scope("action_network"):
             self.action_net = action_net_ctor(self.states, **ctor_params)
             self.action_logits, self.action_probs = self.action_net
+
+    @wrap_graph
+    def _calculate_loss(self):
+        with tf.name_scope("pg_gradient"):
+            self.actor_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="action_network")
+
+            with tf.variable_scope("action_network", reuse=True):
+                action_logits = self.action_logits
+    
+            with tf.name_scope("loss"):    
+                self.x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(action_logits, self.labels, name="cross_entropy_loss")
+                self.pg_loss = tf.reduce_mean(self.x_entropy_loss, name="pg_loss")
+
+            self.discounted_r = self.discount_rewards(self.rewards, self.gamma)
+            #normalize discounted rewards
+            self.discounted_r -= np.mean(self.discounted_r)
+            self.discounted_r /= np.std(self.discounted_r)
+
+            with tf.name_scope("gradient_calc"):
+                self.gradients = self.optimizer.computer_gradients(self.pg_loss, self.actor_vars)
+                for i, (grad, var) in enumerate(self.gradients):
+                    if grad is not None:
+                        self.gradients[i] = (grad * self.discounted_r)
+
+            with tf.name_scope("summaries"):
+                tf.scalar_summary("actor_loss", self.pg_loss)
+
+                #Gradient summaries
+                for grad, var in self.gradients:
+                    tf.histogram_summary(var.name, var)
+                    if grad is not None:
+                        tf.histogram_summary(var.name + '/gradients', grad)
+                
+                self.summarize = tf.merge_all_summaries()
+            
+            with tf.name_scope("train"):
+                self.train_op = self.optimizer.apply_gradients(self.gradients)
 
     def act(self, state):
         
@@ -107,10 +157,10 @@ class PGAgent(PongAgent):
             state = state.reshape((1, self.state_dim))
         
         #Run policy to get action
-        action_probs = self.action_probs.eval(session=self.sess, feed_dict={self.states: state})
-        action = np.argmax(action_probs) + 2 #map to discrete state 2 (up) or 3 (down)
+        action_logits = self.action_logits.eval(session=self.sess, feed_dict={self.states: state})
+        action = np.argmax(action_logits) + 2 #map to discrete state 2 (up) or 3 (down)
 
-        return action_probs, action
+        return action_logits, action
     
     def run_trajectory(self, env):
         states, action_probs, actions, rewards = [], [], [], []
@@ -166,3 +216,4 @@ class PGAgent(PongAgent):
         shuffled = [episodes[i] for i in indices]
         
         return shuffled
+

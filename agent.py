@@ -49,7 +49,7 @@ class PongAgent(object):
         raise NotImplementedError
 
     @property
-    def num_experiences(self):
+    def num_episodes(self):
         assert len(self._state_buffer) == len(self._action_buffer) == len(self._reward_buffer)
         return len(self._state_buffer)
 
@@ -153,6 +153,16 @@ class PGAgent(PongAgent):
         
         return trajectories
 
-    def experiences(self, N):
-        state_it, action_it, reward_it = [itertools.islice(buf, 0, N) for buf in (self._state_buffer, self._action_buffer, self._reward_buffer)]
-        return itertools.izip(state_it, action_it, reward_it)
+    @property
+    def _episodes(self):
+        return zip(self._state_buffer, self._action_buffer, self._reward_buffer)
+    
+    def fetch_episodes(self, N, shuffle=True):
+        '''Retrieve min(N, num_episodes) random episodes from experience buffer
+        Returns list of (states, actions, rewards) episode tuples
+        '''
+        episodes = self._episodes
+        indices = np.random.choice(self.num_episodes, size=min(N, self.num_episodes), replace=False)
+        shuffled = [episodes[i] for i in indices]
+        
+        return shuffled

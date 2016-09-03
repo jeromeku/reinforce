@@ -1,6 +1,7 @@
 import itertools
 import numpy as np
 from collections import deque
+import pdb
 
 import tensorflow as tf
 from toolz import accumulate
@@ -24,7 +25,10 @@ class PongAgent(object):
         self.VALID_ACTIONS = [2,3]
         self.MAX_LEN = 100 # Max capacity of experience buffer
 
+        #Experience buffers: state_buffer stores raw observations, internal_state_buffer stores preprocessed states that are fed to the policy
         self._state_buffer = deque(maxlen=self.MAX_LEN)
+        self._internal_state_buffer = deque(maxlen=self.MAX_LEN)
+        self._action_logits_buffer = deque(maxlen=self.MAX_LEN)
         self._action_buffer = deque(maxlen=self.MAX_LEN)
         self._reward_buffer = deque(maxlen=self.MAX_LEN)
 
@@ -114,23 +118,34 @@ class PGAgent(PongAgent):
 
     @wrap_graph
     def _calculate_loss(self):
+        '''Policy Gradient loss
+        TODO:
+        regularization
+        gradient clipping
+        advantage estimation
+        actor-critic
+        '''
         with tf.name_scope("pg_gradient"):
             self.actor_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="action_network")
 
+            #Logits
             with tf.variable_scope("action_network", reuse=True):
                 action_logits = self.action_logits
     
+            #Cross Entropy Loss, Logits as predictions, Actions taken as "targets"
             with tf.name_scope("loss"):    
                 self.x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(action_logits, self.labels, name="cross_entropy_loss")
                 self.pg_loss = tf.reduce_mean(self.x_entropy_loss, name="pg_loss")
 
+            #Discounted rewards for policy gradient
             self.discounted_r = self.discount_rewards(self.rewards, self.gamma)
             #normalize discounted rewards
             self.discounted_r -= np.mean(self.discounted_r)
             self.discounted_r /= np.std(self.discounted_r)
 
+            #Combine cross entropy loss and discounted rewards to arrive at policy gradients - per episode per step per variable.  I.e., if batch size is an episode, then have batch_size rewards per episode and batch_size grads per variable per episode, so grad * discounted rewards will be component-wise multiplication of dimension batch_size x grad_size
             with tf.name_scope("gradient_calc"):
-                self.gradients = self.optimizer.computer_gradients(self.pg_loss, self.actor_vars)
+                self.gradients = self.optimizer.compute_gradients(self.pg_loss, self.actor_vars)
                 for i, (grad, var) in enumerate(self.gradients):
                     if grad is not None:
                         self.gradients[i] = (grad * self.discounted_r)
@@ -150,9 +165,15 @@ class PGAgent(PongAgent):
                 self.train_op = self.optimizer.apply_gradients(self.gradients)
 
     def act(self, state):
-        
+        """Policy implementation: given state, returns action logits and actions
+
+        Args:
+            state: should be in preprocessed form
+        Returns:
+            2-tuple consisting of logits and action
+        """
         #Preprocess raw observation
-        state = self._preprocess(state)
+        #state = self._preprocess(state)
         if len(state.shape) == 1:
             state = state.reshape((1, self.state_dim))
         
@@ -163,7 +184,9 @@ class PGAgent(PongAgent):
         return action_logits, action
     
     def run_trajectory(self, env):
-        states, action_probs, actions, rewards = [], [], [], []
+        states, prep_states = [], []
+        action_logits, actions = [], []
+        rewards = []
 
         #Start the simulation by getting initial state
         state = env.reset()
@@ -171,20 +194,26 @@ class PGAgent(PongAgent):
 
         while not done:
             #Agent action
-            aprob, a = self.act(state)
+            prep_state = self._preprocess(state)
+            alog, a = self.act(prep_state)
+
             #Advance simulation wrt agent action and record
             next_state, reward, done, info = env.step(a)
             states.append(state)        
-            actions.append((aprob, a))
+            prep_states.append(prep_state)
+            action_logits.append(alog)
+            actions.append(a)
             rewards.append(reward)
 
             #Update state
             state = next_state
 
         #Write to experience buffer
-        self._state_buffer.append(states)
-        self._action_buffer.append(actions)
-        self._reward_buffer.append(rewards)
+        self._state_buffer.append(np.array(states))
+        self._internal_state_buffer.append(np.array(prep_states))
+        self._action_logits_buffer.append(np.array(action_logits))
+        self._action_buffer.append(np.array(actions))
+        self._reward_buffer.append(np.array(rewards))
 
         return states, actions, rewards
 
@@ -205,15 +234,23 @@ class PGAgent(PongAgent):
 
     @property
     def _episodes(self):
-        return zip(self._state_buffer, self._action_buffer, self._reward_buffer)
+        return zip(self._state_buffer, self._internal_state_buffer, self._action_logits_buffer, self._action_buffer, self._reward_buffer)
     
-    def fetch_episodes(self, N, shuffle=True):
+    def shuffle_episodes(self):
         '''Retrieve min(N, num_episodes) random episodes from experience buffer
         Returns list of (states, actions, rewards) episode tuples
         '''
         episodes = self._episodes
-        indices = np.random.choice(self.num_episodes, size=min(N, self.num_episodes), replace=False)
+        indices = np.random.permutation(len(episodes))
         shuffled = [episodes[i] for i in indices]
-        
+
         return shuffled
+
+    def batch_iter(self):
+        shuffled_eps = self.shuffle_episodes()
+
+        for eps in shuffled_eps:
+            pdb.set_trace()
+            _, prep_state, _, actions, rewards = eps
+            yield prep_state, actions, rewards
 

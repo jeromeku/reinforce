@@ -69,6 +69,12 @@ class PongAgent(object):
         discounted_seqs = [self.discount(rs, discount_rate) for rs in rewards]
         return np.concatenate(discounted_seqs).reshape((-1,1)).ravel()
 
+    def normalize(self, data):
+        data -= np.mean(data)
+        data /= np.std(data)
+        
+        return data
+
 class RandomAgent(PongAgent):
     def act(self, state):
         a = np.random.choice(self.VALID_ACTIONS, size=1)[0]
@@ -108,13 +114,23 @@ class PGAgent(PongAgent):
     def _create_variables(self):
         with tf.name_scope("inputs"):
             self.states = tf.placeholder(tf.float32, (None, self.state_dim), name="states")
-            self.labels = tf.placeholder(tf.int32, shape=[None], name="labels")
+            self.actions = tf.placeholder(tf.int32, shape=[None], name="actions")
             self.rewards = tf.placeholder(tf.float32, shape=[None], name="rewards")
+            self.discounted_r = tf.placeholder(tf.float32, shape=[None], name="discounted_rewards")
+            self.labels = self.actions - 2
+ 
     @wrap_graph
     def _build_action_network(self, action_net_ctor, ctor_params):
         with tf.variable_scope("action_network"):
             self.action_net = action_net_ctor(self.states, **ctor_params)
             self.action_logits, self.action_probs = self.action_net
+
+    @wrap_graph
+    def _x_entropy_loss(self):
+        if not hasattr(self, "x_entropy_loss"):
+            with tf.name_scope("loss"):    
+                self.x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(self.action_logits, self.labels, name="x_entropy_loss")
+        return self.x_entropy_loss
 
     @wrap_graph
     def _calculate_loss(self):
@@ -133,15 +149,13 @@ class PGAgent(PongAgent):
                 action_logits = self.action_logits
     
             #Cross Entropy Loss, Logits as predictions, Actions taken as "targets"
-            with tf.name_scope("loss"):    
-                self.x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(action_logits, self.labels, name="cross_entropy_loss")
                 self.pg_loss = tf.reduce_mean(self.x_entropy_loss, name="pg_loss")
 
             #Discounted rewards for policy gradient
-            self.discounted_r = self.discount_rewards(self.rewards, self.gamma)
+#            self.discounted_r = self.discount_rewards(self.rewards, self.gamma)
             #normalize discounted rewards
-            self.discounted_r -= np.mean(self.discounted_r)
-            self.discounted_r /= np.std(self.discounted_r)
+ #           self.discounted_r -= np.mean(self.discounted_r)
+  #          self.discounted_r /= np.std(self.discounted_r)
 
             #Combine cross entropy loss and discounted rewards to arrive at policy gradients - per episode per step per variable.  I.e., if batch size is an episode, then have batch_size rewards per episode and batch_size grads per variable per episode, so grad * discounted rewards will be component-wise multiplication of dimension batch_size x grad_size
             with tf.name_scope("gradient_calc"):
@@ -250,7 +264,6 @@ class PGAgent(PongAgent):
         shuffled_eps = self.shuffle_episodes()
 
         for eps in shuffled_eps:
-            pdb.set_trace()
             _, prep_state, _, actions, rewards = eps
             yield prep_state, actions, rewards
 

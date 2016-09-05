@@ -88,7 +88,7 @@ class RandomAgent(PongAgent):
         
 class PGAgent(PongAgent):
     
-    def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params, gamma=.99):
+    def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params, optimizer_params, gamma=.99, optimizer=tf.train.RMSPropOptimizer):
         super(PGAgent, self).__init__()
         
         self.state_dim = state_dim
@@ -97,13 +97,18 @@ class PGAgent(PongAgent):
         assert sess.graph == g
         self.g = g
         self.sess = sess
-        
+        self.optimizer = optimizer(**optimizer_params)
+
         #Create input ops, action network
         self._create_variables()
         self._build_action_network(action_net_ctor, action_net_params)
+        self._calculate_loss()
         
+
         #Housekeeping: initialize variables, set up tensorflow summaries
         self._initialize()
+
+
     
     @wrap_graph
     def _initialize(self):
@@ -125,12 +130,13 @@ class PGAgent(PongAgent):
             self.action_net = action_net_ctor(self.states, **ctor_params)
             self.action_logits, self.action_probs = self.action_net
 
+    @property
     @wrap_graph
-    def _x_entropy_loss(self):
-        if not hasattr(self, "x_entropy_loss"):
-            with tf.name_scope("loss"):    
-                self.x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(self.action_logits, self.labels, name="x_entropy_loss")
-        return self.x_entropy_loss
+    def x_entropy_loss(self):
+        if not hasattr(self, "_x_entropy_loss"):
+            with tf.name_scope("loss_functions"):    
+                self._x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(self.action_logits, self.labels, name="x_entropy_loss")
+        return self._x_entropy_loss
 
     @wrap_graph
     def _calculate_loss(self):
@@ -145,38 +151,39 @@ class PGAgent(PongAgent):
             self.actor_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="action_network")
 
             #Logits
-            with tf.variable_scope("action_network", reuse=True):
-                action_logits = self.action_logits
-    
-            #Cross Entropy Loss, Logits as predictions, Actions taken as "targets"
-                self.pg_loss = tf.reduce_mean(self.x_entropy_loss, name="pg_loss")
-
-            #Discounted rewards for policy gradient
-#            self.discounted_r = self.discount_rewards(self.rewards, self.gamma)
-            #normalize discounted rewards
- #           self.discounted_r -= np.mean(self.discounted_r)
-  #          self.discounted_r /= np.std(self.discounted_r)
-
-            #Combine cross entropy loss and discounted rewards to arrive at policy gradients - per episode per step per variable.  I.e., if batch size is an episode, then have batch_size rewards per episode and batch_size grads per variable per episode, so grad * discounted rewards will be component-wise multiplication of dimension batch_size x grad_size
-            with tf.name_scope("gradient_calc"):
-                self.gradients = self.optimizer.compute_gradients(self.pg_loss, self.actor_vars)
-                for i, (grad, var) in enumerate(self.gradients):
-                    if grad is not None:
-                        self.gradients[i] = (grad * self.discounted_r)
-
-            with tf.name_scope("summaries"):
-                tf.scalar_summary("actor_loss", self.pg_loss)
-
-                #Gradient summaries
-                for grad, var in self.gradients:
-                    tf.histogram_summary(var.name, var)
-                    if grad is not None:
-                        tf.histogram_summary(var.name + '/gradients', grad)
+            with tf.variable_scope("action_network", reuse=True), tf.name_scope("loss"):
+                #action_logits = self.action_logits
+                #
+                self.logprob = tf.log(tf.reduce_max(tf.nn.softmax(self.action_logits), reduction_indices=1))
+                #Modulate logprobs by advantage
+                self.logprob_advantage = self.logprob * self.discounted_r
+                #Sum across time
+                self.loss = -tf.reduce_sum(self.logprob_advantage)
+                #Check
+                self.loss_x_ent = tf.reduce_sum(self.x_entropy_loss * self.discounted_r)
                 
-                self.summarize = tf.merge_all_summaries()
+                #check logprob: x_entropy loss should be equal to -logprob
+                
+            with tf.name_scope("vanilla_pg"):
+                #self.gradients_opt = self.optimizer.compute_gradients(neg_logprob, self.actor_vars)
+                self.gradients_loss = tf.gradients(self.loss, self.actor_vars)
+                # for i, (grad, var) in enumerate(self.gradients):
+                #     if grad is not None: #grad should have dim batch_size
+                #         self.gradients[i] = (grad * self.discounted_r)
+
+            # # with tf.name_scope("summaries"):
+            #      tf.scalar_summary("actor_loss", self.pg_loss)
+
+            #     #Gradient summaries
+            #     for grad, var in self.gradients:
+            #         tf.histogram_summary(var.name, var)
+            #         if grad is not None:
+            #             tf.histogram_summary(var.name + '/gradients', grad)
+                
+            #     self.summarize = tf.merge_all_summaries()
             
-            with tf.name_scope("train"):
-                self.train_op = self.optimizer.apply_gradients(self.gradients)
+            # with tf.name_scope("train"):
+            #     self.train_op = self.optimizer.apply_gradients(self.gradients)
 
     def act(self, state):
         """Policy implementation: given state, returns action logits and actions

@@ -7,6 +7,7 @@ import tensorflow as tf
 from toolz import accumulate
 
 from utils import wrap_graph_c as wrap_graph
+from utils import encode_one_hot
 
 class Policy(object):
     def __init__(self):
@@ -104,7 +105,6 @@ class PGAgent(PongAgent):
         self._build_action_network(action_net_ctor, action_net_params)
         self._calculate_loss()
         
-
         #Housekeeping: initialize variables, set up tensorflow summaries
         self._initialize()
 
@@ -122,7 +122,7 @@ class PGAgent(PongAgent):
             self.actions = tf.placeholder(tf.int32, shape=[None], name="actions")
             self.rewards = tf.placeholder(tf.float32, shape=[None], name="rewards")
             self.discounted_r = tf.placeholder(tf.float32, shape=[None], name="discounted_rewards")
-            self.labels = self.actions - 2
+            self.labels = tf.placeholder(tf.float32, shape=[None, 2], name="labels")
  
     @wrap_graph
     def _build_action_network(self, action_net_ctor, ctor_params):
@@ -142,6 +142,7 @@ class PGAgent(PongAgent):
     def _calculate_loss(self):
         '''Policy Gradient loss
         TODO:
+        change calculation of logprobs to log(<label inputs, action logits>)
         regularization
         gradient clipping
         advantage estimation
@@ -154,13 +155,15 @@ class PGAgent(PongAgent):
             with tf.variable_scope("action_network", reuse=True), tf.name_scope("loss"):
                 #action_logits = self.action_logits
                 #
-                self.logprob = tf.log(tf.reduce_max(tf.nn.softmax(self.action_logits), reduction_indices=1))
+                probs = self.probs = tf.nn.softmax(self.action_logits)
+                self.logprob = tf.log(tf.reduce_max(tf.mul(self.labels, probs), reduction_indices=1),name="logprob")
+                #self.logprob = tf.log(tf.reduce_max(probs, reduction_indices=1))
                 #Modulate logprobs by advantage
                 self.logprob_advantage = self.logprob * self.discounted_r
                 #Sum across time
                 self.loss = -tf.reduce_sum(self.logprob_advantage)
                 #Check
-                self.loss_x_ent = tf.reduce_sum(self.x_entropy_loss * self.discounted_r)
+             #   self.loss_x_ent = tf.reduce_sum(self.x_entropy_loss * self.discounted_r)
                 
                 #check logprob: x_entropy loss should be equal to -logprob
                 

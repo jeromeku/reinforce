@@ -35,9 +35,6 @@ def play(env, agent):
         yield display(state, preprocessor=agent._preprocess)
         action = agent.act(state)
 
-def discount_rewards(rewards, discount_rate):
-    pass
-
 def discount(rs, discount_rate):
     discounted = accumulate(lambda prev, curr: discount_rate * prev + curr, reversed(rs))
     return np.fromiter(discounted,'float')[::-1]
@@ -74,7 +71,6 @@ def discount_check(rewards, discount_rate):
     print np.allclose(my_r, Kp_r)
     return my_r, Kp_r
 
-
 def normalize(r):
     r -= np.mean(r)
     r /= np.std(r)
@@ -97,4 +93,17 @@ def wrap_graph_c(f):
         with self.g.as_default():
             return f(self, *args, **kwargs)
     return wrapped
+
+def encode_one_hot(label_vec, num_factors=None):
+    if not num_factors:
+        num_factors = len(set(label_vec))
+
+    num_examples = len(label_vec)
+    one_hot = np.zeros(shape=(num_examples,num_factors), dtype='float32')
+    one_hot[range(num_examples), label_vec] = 1.
+
+    return one_hot
+
+
+
 

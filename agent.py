@@ -89,11 +89,12 @@ class RandomAgent(PongAgent):
         
 class PGAgent(PongAgent):
     
-    def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params, optimizer_params, gamma=.99, optimizer=tf.train.RMSPropOptimizer):
+    def __init__(self, g, sess, state_dim, action_net_ctor, action_net_params, optimizer_params, gamma=.99, epsilon=1, optimizer=tf.train.RMSPropOptimizer):
         super(PGAgent, self).__init__()
         
         self.state_dim = state_dim
         self.gamma = gamma #rate at which to discount rewards
+        self.epsilon = epsilon #exploration, 0 corresponds to always explore, 1 corresponds to stochastic policy
 
         assert sess.graph == g
         self.g = g
@@ -138,6 +139,18 @@ class PGAgent(PongAgent):
                 self._x_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(self.action_logits, self.labels, name="x_entropy_loss")
         return self._x_entropy_loss
 
+    def advantage(self):
+        '''Advantage function
+        Naive advantage: discounted rewards
+        
+        TODO - implement variance reduction:
+        -normalize rewards
+        -baseline
+        -value function
+        -actor-critic
+        '''
+        return self.discounted_r
+
     @wrap_graph
     def _calculate_loss(self):
         '''Policy Gradient loss
@@ -153,11 +166,11 @@ class PGAgent(PongAgent):
 
             #Logits
             with tf.variable_scope("action_network", reuse=True), tf.name_scope("loss"):
-                #action_logits = self.action_logits
-                #
+                
+                #Calculate log probabilities from actions scores
                 probs = self.probs = tf.nn.softmax(self.action_logits)
                 self.logprob = tf.log(tf.reduce_max(tf.mul(self.labels, probs), reduction_indices=1),name="logprob")
-                #self.logprob = tf.log(tf.reduce_max(probs, reduction_indices=1))
+                
                 #Modulate logprobs by advantage
                 self.logprob_advantage = self.logprob * self.discounted_r
                 #Sum across time
@@ -165,14 +178,8 @@ class PGAgent(PongAgent):
                 #Check
              #   self.loss_x_ent = tf.reduce_sum(self.x_entropy_loss * self.discounted_r)
                 
-                #check logprob: x_entropy loss should be equal to -logprob
-                
-            with tf.name_scope("vanilla_pg"):
-                #self.gradients_opt = self.optimizer.compute_gradients(neg_logprob, self.actor_vars)
-                self.gradients_loss = tf.gradients(self.loss, self.actor_vars)
-                # for i, (grad, var) in enumerate(self.gradients):
-                #     if grad is not None: #grad should have dim batch_size
-                #         self.gradients[i] = (grad * self.discounted_r)
+            with tf.name_scope("gradient_calc"):
+                self.gradients = self.optimizer.compute_gradients(self.loss, self.actor_vars)
 
             # # with tf.name_scope("summaries"):
             #      tf.scalar_summary("actor_loss", self.pg_loss)
@@ -185,8 +192,8 @@ class PGAgent(PongAgent):
                 
             #     self.summarize = tf.merge_all_summaries()
             
-            # with tf.name_scope("train"):
-            #     self.train_op = self.optimizer.apply_gradients(self.gradients)
+            with tf.name_scope("train"):
+                 self.train_op = self.optimizer.apply_gradients(self.gradients)
 
     def act(self, state):
         """Policy implementation: given state, returns action logits and actions
@@ -203,9 +210,15 @@ class PGAgent(PongAgent):
         
         #Run policy to get action
         action_logits = self.action_logits.eval(session=self.sess, feed_dict={self.states: state})
-        action = np.argmax(action_logits) + 2 #map to discrete state 2 (up) or 3 (down)
+        action_probs = self.action_probs.eval(session=self.sess, feed_dict={self.states: state})[0]
+    
+        if np.random.uniform() > self.epsilon:
+            action = np.random.choice(self.VALID_ACTIONS)
+        else:
+            action = np.random.choice(self.VALID_ACTIONS, p=action_probs)
+            #np.argmax(action_logits) + 2 #map to discrete state 2 (up) or 3 (down)
 
-        return action_logits, action
+        return action_logits, action_probs, action
     
     def run_trajectory(self, env):
         states, prep_states = [], []
@@ -219,7 +232,7 @@ class PGAgent(PongAgent):
         while not done:
             #Agent action
             prep_state = self._preprocess(state)
-            alog, a = self.act(prep_state)
+            alog, aprobs, a = self.act(prep_state)
 
             #Advance simulation wrt agent action and record
             next_state, reward, done, info = env.step(a)
@@ -269,6 +282,14 @@ class PGAgent(PongAgent):
         shuffled = [episodes[i] for i in indices]
 
         return shuffled
+
+    def train(self, batch):
+        '''Accumulate gradient over batch_size episodes and apply to weights
+        batch is tuple of states, labels (one-hot), and discounted rewards
+
+        Length of batch should be length of concatenated trajectories of the episodes
+        '''
+        pass
 
     def batch_iter(self):
         shuffled_eps = self.shuffle_episodes()

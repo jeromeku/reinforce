@@ -1,4 +1,5 @@
 import itertools
+import random
 import numpy as np
 from collections import deque
 import pdb
@@ -32,6 +33,7 @@ class PongAgent(object):
         self._action_logits_buffer = deque(maxlen=self.MAX_LEN)
         self._action_buffer = deque(maxlen=self.MAX_LEN)
         self._reward_buffer = deque(maxlen=self.MAX_LEN)
+        self._discounted_reward_buffer = deque(maxlen=self.MAX_LEN)
 
     def _preprocess(self, I):
         I = I[35:195] # crop
@@ -108,9 +110,7 @@ class PGAgent(PongAgent):
         
         #Housekeeping: initialize variables, set up tensorflow summaries
         self._initialize()
-
-
-    
+  
     @wrap_graph
     def _initialize(self):
         init_op = tf.initialize_all_variables()
@@ -251,7 +251,7 @@ class PGAgent(PongAgent):
         self._action_logits_buffer.append(np.array(action_logits))
         self._action_buffer.append(np.array(actions))
         self._reward_buffer.append(np.array(rewards))
-
+        self._discounted_reward_buffer.append(self.discount_rewards(rewards, self.gamma))
         return states, actions, rewards
 
     def rollout(self, N, env):
@@ -271,8 +271,36 @@ class PGAgent(PongAgent):
 
     @property
     def _episodes(self):
-        return zip(self._state_buffer, self._internal_state_buffer, self._action_logits_buffer, self._action_buffer, self._reward_buffer)
+        return zip(self._state_buffer, self._internal_state_buffer, self._action_logits_buffer, self._action_buffer, self._reward_buffer, self._discounted_reward_buffer)
     
+    def _in_order_sampler(self, idx_len, sample_size):
+        idx_iter = itertools.cycle(np.random.permutation(idx_len))
+
+        while True:
+            yield list(itertools.islice(idx_iter, sample_size))
+    
+    def _random_sampler(self, idx_len, sample_size):
+        while True:
+            yield random.sample(range(idx_len),sample_size)
+
+    def sample_experiences(self, sample_size, use_all=False):
+        '''Draw sample_size experiences from replay buffer
+        '''
+        #Concatenate episodes into single array
+        episodes = zip(*list(self.batch_iter()))
+        prep_states, actions, discounted_rewards = [np.concatenate(eps) for eps in episodes]
+
+        idx_len = len(prep_states)
+
+        if use_all:
+            sampler = self._in_order_sampler(idx_len, sample_size)
+        else:
+            sampler = self._random_sampler(idx_len, sample_size)
+
+        while True:
+            sample_idx = sampler.next()
+            yield prep_states[sample_idx], actions[sample_idx], discounted_rewards[sample_idx]
+
     def shuffle_episodes(self):
         '''Retrieve min(N, num_episodes) random episodes from experience buffer
         Returns list of (states, actions, rewards) episode tuples
@@ -295,6 +323,6 @@ class PGAgent(PongAgent):
         shuffled_eps = self.shuffle_episodes()
 
         for eps in shuffled_eps:
-            _, prep_state, _, actions, rewards = eps
-            yield prep_state, actions, rewards
+            _, prep_state, _, actions, _, discounted_rewards = eps
+            yield prep_state, actions, discounted_rewards
 

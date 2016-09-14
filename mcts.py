@@ -90,6 +90,15 @@ class PongEnv(TestEnv):
     @property
     def games_played(self):
         return len(self.history)
+    
+    @property
+    def points_played(self):
+        '''Points played = points from history + current trajectory
+        '''
+        history_pts = sum(len(p) for p in self.history)
+        current_pts = len(self.trajectory)
+
+        return history_pts + current_pts
 
     @property
     def valid_actions(self):
@@ -97,12 +106,13 @@ class PongEnv(TestEnv):
         '''
         return [2,3]
     
-    def simulate(self):
+    def simulate(self, max_points=None):
         '''Simulate path starting from current state
         '''
         path = []
 
         while not self.is_terminal and not self.is_point:
+        
             action = self.sample_action()
             next_state, reward, terminal, info = self.env.step(action)
             path.append((self.state, action, reward))
@@ -197,7 +207,7 @@ class MCTS(object):
             return
             #self.select(node, env)
 
-    def simulate(self, node, env):
+    def simulate(self, node, env, max_points=None):
         print "simulating"
 
         #Initial step following expansion
@@ -206,7 +216,7 @@ class MCTS(object):
         node.state = s
         
         #Rollout from expanded node
-        states, actions, rewards = env.simulate()
+        states, actions, rewards = env.simulate(max_points=max_points)
         states = [s] + states
         actions = [a] + actions
         rewards = [r] + rewards

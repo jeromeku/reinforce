@@ -1,167 +1,183 @@
-#!/usr/bin/env python2
-import os
-import gym
-import sys
+import numpy as np
 import random
 import itertools
-from time import time
-from copy import copy
-from math import sqrt, log
-
+import numpy as np
 from collections import namedtuple
 
-def moving_average(v, n):
-    n = min(len(v), n)
-    ret = [.0]*(len(v)-n+1)
-    ret[0] = float(sum(v[:n]))/n
-    for i in range(len(v)-n):
-        ret[i+1] = ret[i] + float(v[n+i] - v[i])/n
-    return ret
+import gym
+import tensorflow
 
+from utils import take, partition_points
 
-def ucb(node):
-    return node.value / node.visits + sqrt(log(node.parent.visits)/node.visits)
+class TestEnv(object):
+    def __init__(self, name):
+        self.env = gym.make(name)
+        self.state = self.env.reset()
+        self.trajectory = []
+        self.history = []
+        self.is_terminal = False
+        
+    def reset(self):
+        self.state = self.env.reset()
+        self.history = []
+    
+    def step(self, a):
+        next_state, reward, terminal, info = self.env.step(a)
+        self.state = next_state
+        self.is_terminal
+        return next_state, reward, terminal, info
+        
+    def simulate(self):
+        '''Simulate path starting from current state
+        '''
+        path = []
+        while not self.is_terminal:
+            action = self.sample_action()
+            next_state, reward, terminal, info = self.env.step(action)
+            path.append((self.state, action, reward))
+            self.state = next_state
+            self.is_terminal = terminal
+            
+        return self._unpack(path)
+    
+    def rollout(self, num_plays=1):
+        '''Simulate num_play trajectories
+        '''
+        if self.is_terminal:
+            self.clear()
+            
+        for i in range(num_plays):
+            trajectory = self.simulate()
+            self.history.append(trajectory)
+            self.clear()
 
-
-def combinations(space):
-    if isinstance(space, gym.spaces.Discrete):
-        return range(space.n)
-    elif isinstance(space, gym.spaces.Tuple):
-        return itertools.product(*[combinations(s) for s in space.spaces])
-    else:
+    def _unpack(self, trajectory):
+        s, a, r = map(list, zip(*trajectory))
+        return s, a, r
+    
+    def get_trajectories(self):
+        '''Returns list of trajectories, where each trajectory is a list of states, actions, and rewards
+        '''
+        if self.history:
+            return [self._unpack(trajectory) for trajectory in self.history]
+        else:
+            print "No trajectories"
+            return None
+        
+    def sample_action(self, state=None, policy=None, n=1):
+        if not policy:
+            return np.random.choice(self.valid_actions, size=n)
+            
+    def clear(self):
+        self.state = self.env.reset()
+        self.is_terminal = False
+        
+    def clear_all(self):
+        self.clear()
+        self.history = []
+    
+    @property
+    def valid_actions(self):
         raise NotImplementedError
 
-fields = ["state", "action", "parent", "children", "explored_children", "visits", "value"]
-
-_Node = namedtuple("Node", " ".join(fields))
-
-class Node:
-    def __init__(self, parent, action):
+        
+class PongEnv(TestEnv):
+    def __init__(self):
+        super(PongEnv, self).__init__("Pong-v0")
+        
+    @property
+    def valid_actions(self):
+        '''Valid actions limited to 2 (up) and 3 (down)
+        '''
+        return [2,3]
+    
+class Node(object):
+    def __init__(self, parent=None, action=None, state=None, terminal=False):
         self.parent = parent
         self.action = action
+        self.state = state
+        self.is_terminal = terminal
         self.children = []
-        self.explored_children = 0
-        self.visits = 0
-        self.value = 0
+        self.explored_children = []
+        self.value = 0.
+        self.visits = 0.
+        
+        
+    def expand(self, env):
+        for action in env.valid_actions:
+            self.children.append(Node(parent=self, action=action))
+        self.child_iter = iter(self.children)
+        
+    @property
+    def num_children(self):
+        return len(self.children)
+    
+    @property
+    def num_explored(self):
+        return len(self.explored_children)
+    
+    def get_unvisited(self):
+        child = next(self.child_iter, None)
+        self.explored_children.append(child)
+        return child
+        
+    @property
+    def has_unvisited(self):
+        return (self.num_explored < self.num_children) and self.num_children > 0
+    
+fields = ["state", "action", "parent", "children", "explored_children", "visits", "value"]
 
+class MCTS(object):
+    def simulate(node, env):
+        print "simulating"
+        a = node.action
+        s, r, terminal, info = env.step(a)
+        node.state = s
+        
+        states, actions, rewards = env.simulate()
+        states = [s] + states
+        actions = [a] + actions
+        rewards = [r] + rewards
+        
+        return states, actions, rewards
 
-class Runner:
-    def __init__(self, rec_dir, env_name, loops=300, max_depth=1000, playouts=10000):
-        self.env_name = env_name
-        self.dir = rec_dir+'/'+env_name
+    def bandit(node):
+        pass
 
-        self.loops = loops
-        self.max_depth = max_depth
-        self.playouts = playouts
-
-    def print_stats(self, loop, score, avg_time):
-        sys.stdout.write('\r%3d   score:%10.3f   avg_time:%4.1f s' % (loop, score, avg_time))
-        sys.stdout.flush()
-
-    def run(self):
-        best_rewards = []
-        start_time = time()
-        env = gym.make(self.env_name)
-        env.monitor.start(self.dir)
-
-        print self.env_name
-
-        for loop in xrange(self.loops):
-            env.reset()
-            root = Node(None, None)
-
-            best_actions = []
-            best_reward = float("-inf")
-
-            for _ in xrange(self.playouts):
-                state = copy(env)
-                del state._monitor
-
-                sum_reward = 0
-                node = root
-                terminal = False
-                actions = []
-
-                # selection
-                while node.children:
-                    if node.explored_children < len(node.children):
-                        child = node.children[node.explored_children]
-                        node.explored_children += 1
-                        node = child
-                    else:
-                        node = max(node.children, key=ucb)
-                    _, reward, terminal, _ = state.step(node.action)
-                    sum_reward += reward
-                    actions.append(node.action)
-
-                # expansion
-                if not terminal:
-                    node.children = [Node(node, a) for a in combinations(state.action_space)]
-                    random.shuffle(node.children)
-
-                # playout
-                while not terminal:
-                    action = state.action_space.sample()
-                    _, reward, terminal, _ = state.step(action)
-                    sum_reward += reward
-                    actions.append(action)
-
-                    if len(actions) > self.max_depth:
-                        sum_reward -= 100
-                        break
-
-                # remember best
-                if best_reward < sum_reward:
-                    best_reward = sum_reward
-                    best_actions = actions
-
-                # backpropagate
-                while node:
-                    node.visits += 1
-                    node.value += sum_reward
-                    node = node.parent
-
-                # fix monitors not being garbage collected
-                del state._monitor
-
-            sum_reward = 0
-            for action in best_actions:
-                _, reward, terminal, _ = env.step(action)
-                sum_reward += reward
-                if terminal:
-                    break
-
-            best_rewards.append(sum_reward)
-            score = max(moving_average(best_rewards, 100))
-            avg_time = (time()-start_time)/(loop+1)
-            self.print_stats(loop+1, score, avg_time)
-        env.monitor.close()
+    def printDx(result):
+        s, a, r = map(np.array, result)
+        print "Num steps: ", len(s)
+        print "Final Score: {} to {}".format(np.sum(r > 0), np.sum(r < 0))
+        print "Num Up moves: {}".format(np.sum(a == 2))
+        print "Num Down moves: {}".format(np.sum(a == 3))
         print
-
-
-def main():
-    # get rec_dir
-    if not os.path.exists('rec'):
-        os.makedirs('rec')
-        next_dir = 0
-    else:
-        next_dir = max([int(f) for f in os.listdir('rec')+["0"] if f.isdigit()])+1
-    rec_dir = 'rec/'+str(next_dir)
-    os.makedirs(rec_dir)
-    print "rec_dir:", rec_dir
-
-    # Toy text
-    Runner(rec_dir, 'Taxi-v1',   loops=100, playouts=4000, max_depth=50).run()
-    Runner(rec_dir, 'NChain-v0', loops=100, playouts=3000, max_depth=50).run()
-
-    # Algorithmic
-    Runner(rec_dir, 'Copy-v0').run()
-    Runner(rec_dir, 'RepeatCopy-v0').run()
-    Runner(rec_dir, 'DuplicatedInput-v0').run()
-    Runner(rec_dir, 'ReversedAddition-v0').run()
-    Runner(rec_dir, 'ReversedAddition3-v0').run()
-    Runner(rec_dir, 'Reverse-v0').run()
-
-
-if __name__ == "__main__":
-    main()
+        
+    def backprop(result):
+        print "backprop'ing"
+        print 
+        
+    def select(node, env):
+        #Expand if new state (and not terminal)
+        if node.num_children == 0:
+            print "expanding"
+            node.expand(env)
+            print 
+            
+        elif node.has_unvisited:
+            child = node.get_unvisited()
+            print "exploring child {}".format(node.num_explored)
+            
+            #Simulate
+            action = child.action
+            result = simulate(child, env)
+            printDx(result)
+            
+            #Backprop
+            backprop(result)
+            env.clear()
+        else:
+            #Run bandit selection algorithm if expanded and all children visited at least once
+            bandit(node)
+            print "all children visited, running bandit"
+            return
+        select(node, env)

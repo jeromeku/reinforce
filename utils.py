@@ -104,6 +104,28 @@ def encode_one_hot(label_vec, num_factors=None):
 
     return one_hot
 
+def take(it, n):
+    return list(itertools.islice(it, n))
+
+def partition_points(r):
+    '''
+    Partition episode (single Pong game) into sequences of points
+    
+    First player to reach 21 points wins game.  Partitioning episodes based on point sequences necessary
+    for proper discounting of rewards (+1 for self point, -1 for opponent point)
+    '''
+    
+    #Get indices of non-zero elements, add 1 for proper slicing
+    idx = [0] + (np.nonzero(r)[0] + 1).tolist()
+    slice_sizes = np.diff(idx)
+    r_iter = iter(r)
+    seqs = []
+
+    for sz in slice_sizes:
+        seqs.append(take(r_iter,sz))  
+    
+    return seqs
+
 
 
 

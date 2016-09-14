@@ -69,6 +69,7 @@ class TestEnv(object):
             return np.random.choice(self.valid_actions, size=n)
             
     def clear(self):
+        self.trajectory = []
         self.state = self.env.reset()
         self.is_terminal = False
         
@@ -85,6 +86,10 @@ class PongEnv(TestEnv):
     def __init__(self):
         super(PongEnv, self).__init__("Pong-v0")
         self.is_point = False #state for when a point is scored by either player
+
+    @property
+    def games_played(self):
+        return len(self.history)
 
     @property
     def valid_actions(self):
@@ -108,7 +113,7 @@ class PongEnv(TestEnv):
                 print "point scored"
                 self.is_point = True
         
-        #Store path to point to current game trajectory
+        #Store point path to current game trajectory
         self.trajectory.append(self._unpack(path))  
         self.is_point = False
 
@@ -116,6 +121,7 @@ class PongEnv(TestEnv):
         if self.is_terminal:
             print "End of Game"
             self.history.append(self.trajectory)
+            self.clear()
 
         return self._unpack(path)
 

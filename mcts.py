@@ -27,18 +27,18 @@ class TestEnv(object):
         self.is_terminal
         return next_state, reward, terminal, info
         
-    def simulate(self):
-        '''Simulate path starting from current state
-        '''
-        path = []
-        while not self.is_terminal:
-            action = self.sample_action()
-            next_state, reward, terminal, info = self.env.step(action)
-            path.append((self.state, action, reward))
-            self.state = next_state
-            self.is_terminal = terminal
+    # def simulate(self):
+    #     '''Simulate path starting from current state
+    #     '''
+    #     path = []
+    #     while not self.is_terminal:
+    #         action = self.sample_action()
+    #         next_state, reward, terminal, info = self.env.step(action)
+    #         path.append((self.state, action, reward))
+    #         self.state = next_state
+    #         self.is_terminal = terminal
             
-        return self._unpack(path)
+    #     return self._unpack(path)
     
     def rollout(self, num_plays=1):
         '''Simulate num_play trajectories
@@ -84,13 +84,42 @@ class TestEnv(object):
 class PongEnv(TestEnv):
     def __init__(self):
         super(PongEnv, self).__init__("Pong-v0")
-        
+        self.is_point = False #state for when a point is scored by either player
+
     @property
     def valid_actions(self):
         '''Valid actions limited to 2 (up) and 3 (down)
         '''
         return [2,3]
     
+    def simulate(self):
+        '''Simulate path starting from current state
+        '''
+        path = []
+
+        while not self.is_terminal and not self.is_point:
+            action = self.sample_action()
+            next_state, reward, terminal, info = self.env.step(action)
+            path.append((self.state, action, reward))
+            self.state = next_state
+            self.is_terminal = terminal
+        
+            if abs(reward) > 0:
+                print "point scored"
+                self.is_point = True
+        
+        #Store path to point to current game trajectory
+        self.trajectory.append(self._unpack(path))  
+        self.is_point = False
+
+        #Append entire game trajectory to environment history
+        if self.is_terminal:
+            print "End of Game"
+            self.history.append(self.trajectory)
+
+        return self._unpack(path)
+
+
 class Node(object):
     def __init__(self, parent=None, action=None, state=None, terminal=False):
         self.parent = parent
@@ -146,7 +175,15 @@ class MCTS(object):
             
             #Backprop
             self.backprop(result, child)
-            env.clear()
+            
+            #Point scored, no need to reset
+            if env.is_point:
+                print "Point scored"
+
+            #End of game reached, reset game
+            if env.is_terminal:
+                print "Gameover"
+                env.clear()
         else:
             #Run bandit selection algorithm if expanded and all children visited at least once
             self.bandit(node)
@@ -156,10 +193,13 @@ class MCTS(object):
 
     def simulate(self, node, env):
         print "simulating"
+
+        #Initial step following expansion
         a = node.action
         s, r, terminal, info = env.step(a)
         node.state = s
         
+        #Rollout from expanded node
         states, actions, rewards = env.simulate()
         states = [s] + states
         actions = [a] + actions
@@ -181,7 +221,7 @@ class MCTS(object):
     def backprop(self, result, child):
         print "backprop'ing"
         s, a, r = result
-        
+
         print 
         
     

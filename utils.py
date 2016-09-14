@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
 from functools import wraps
+
 from toolz import accumulate, compose
 
 import gym
@@ -107,7 +109,7 @@ def encode_one_hot(label_vec, num_factors=None):
 def take(it, n):
     return list(itertools.islice(it, n))
 
-def partition_points(r):
+def partition_points(s, a, r):
     '''
     Partition episode (single Pong game) into sequences of points
     
@@ -118,7 +120,7 @@ def partition_points(r):
     #Get indices of non-zero elements, add 1 for proper slicing
     idx = [0] + (np.nonzero(r)[0] + 1).tolist()
     slice_sizes = np.diff(idx)
-    r_iter = iter(r)
+    r_iter = itertools.izip(s, a, r)
     seqs = []
 
     for sz in slice_sizes:

@@ -128,7 +128,33 @@ class Node(object):
 fields = ["state", "action", "parent", "children", "explored_children", "visits", "value"]
 
 class MCTS(object):
-    def simulate(node, env):
+    def select(self, node, env):
+        #Expand if new state (and not terminal)
+        if node.num_children == 0:
+            print "expanding"
+            node.expand(env)
+            print 
+            
+        if node.has_unvisited:
+            child = node.get_unvisited()
+            print "exploring child {}".format(node.num_explored)
+            
+            #Simulate
+            action = child.action
+            result = self.simulate(child, env)
+            self.printDx(result)
+            
+            #Backprop
+            self.backprop(result, child)
+            env.clear()
+        else:
+            #Run bandit selection algorithm if expanded and all children visited at least once
+            self.bandit(node)
+            print "all children visited, running bandit"
+            return
+            #self.select(node, env)
+
+    def simulate(self, node, env):
         print "simulating"
         a = node.action
         s, r, terminal, info = env.step(a)
@@ -141,10 +167,10 @@ class MCTS(object):
         
         return states, actions, rewards
 
-    def bandit(node):
+    def bandit(self, node):
         pass
 
-    def printDx(result):
+    def printDx(self, result):
         s, a, r = map(np.array, result)
         print "Num steps: ", len(s)
         print "Final Score: {} to {}".format(np.sum(r > 0), np.sum(r < 0))
@@ -152,32 +178,10 @@ class MCTS(object):
         print "Num Down moves: {}".format(np.sum(a == 3))
         print
         
-    def backprop(result):
+    def backprop(self, result, child):
         print "backprop'ing"
+        s, a, r = result
+        
         print 
         
-    def select(node, env):
-        #Expand if new state (and not terminal)
-        if node.num_children == 0:
-            print "expanding"
-            node.expand(env)
-            print 
-            
-        elif node.has_unvisited:
-            child = node.get_unvisited()
-            print "exploring child {}".format(node.num_explored)
-            
-            #Simulate
-            action = child.action
-            result = simulate(child, env)
-            printDx(result)
-            
-            #Backprop
-            backprop(result)
-            env.clear()
-        else:
-            #Run bandit selection algorithm if expanded and all children visited at least once
-            bandit(node)
-            print "all children visited, running bandit"
-            return
-        select(node, env)
+    

@@ -137,16 +137,20 @@ class PongEnv(TestEnv):
 
 
 class Node(object):
-    def __init__(self, parent=None, action=None, state=None, terminal=False):
+    def __init__(self, parent=None, action=None, state=None, root=False, terminal=False):
         self.parent = parent
         self.action = action
         self.state = state
+        self.is_root = root
         self.is_terminal = terminal
-        self.children = []
-        self.explored_children = []
-        self.value = 0.
-        self.visits = 0.
+        self.children, self.explored_children = [],[]
+        self.value, self.visits = 0., 0.
         
+        if root:
+            self.name = "root"
+        else:
+            child_num = len(self.parent.children) + 1
+            self.name = self.parent.name + "/" + "child" + str(child_num) 
         
     def expand(self, env):
         for action in env.valid_actions:
@@ -173,24 +177,41 @@ class Node(object):
 fields = ["state", "action", "parent", "children", "explored_children", "visits", "value"]
 
 class MCTS(object):
+
+    def __init__(self, gamma=1):
+        self.gamma = gamma
+
+    def ucb(self, node):
+        exploit_score = float(node.value) / node.visits
+        explore_score = np.sqrt((2 * np.log(node.parent.visits)) / float(node.visits))
+        
+        return exploit_score + explore_score
+
+    def expand(self, node, env):
+        for action in env.valid_actions:
+            node.children.append(Node(parent=node, action=action))
+        
+        node.child_iter = iter(node.children)
+
     def select(self, node, env):
         #Expand if new state (and not terminal)
         if node.num_children == 0:
-            print "expanding"
-            node.expand(env)
+            print "expanding {}".format(node.name)
+            self.expand(node, env)
             print 
             
         if node.has_unvisited:
             child = node.get_unvisited()
-            print "exploring child {}".format(node.num_explored)
+            print "exploring child {}".format(child.name)
             
             #Simulate
             action = child.action
-            result = self.simulate(child, env)
-            self.printDx(result)
+            results = self.simulate(child, env)
+            self.printDx(results)
+            states, actions, rewards = results
             
             #Backprop
-            self.backprop(result, child)
+            self.backprop(rewards[-1], child)
             
             #Point scored, no need to reset
             if env.is_point:
@@ -202,13 +223,15 @@ class MCTS(object):
                 env.clear()
         else:
             #Run bandit selection algorithm if expanded and all children visited at least once
-            self.bandit(node)
+            ucb_scores = map(self.ucb, node.children)
+            best_child = np.argmax(ucb_scores)
+            selected = node.children[best_child]
             print "all children visited, running bandit"
-            return
-            #self.select(node, env)
+            print "selected child ", best_child + 1
+            self.select(selected, env)
 
     def simulate(self, node, env, max_points=None):
-        print "simulating"
+        print "simulating..."
 
         #Initial step following expansion
         a = node.action
@@ -228,16 +251,25 @@ class MCTS(object):
 
     def printDx(self, result):
         s, a, r = map(np.array, result)
+        print
+        print "{0} Point Dx {0}".format("".join(["*"] * 6))
         print "Num steps: ", len(s)
         print "Final Score: {} to {}".format(np.sum(r > 0), np.sum(r < 0))
         print "Num Up moves: {}".format(np.sum(a == 2))
         print "Num Down moves: {}".format(np.sum(a == 3))
         print
         
-    def backprop(self, result, child):
-        print "backprop'ing"
-        s, a, r = result
-
-        print 
-        
+    def backprop(self, reward, node):
+                
+        #Update stats starting until root
+        print "backpropagating..."
+        node.visits += 1
+        node.value += reward
+        if not node.is_root:
+            self.backprop(self.gamma*reward, node.parent)
+        else:
+            print "reached root"
+            print "{}".format(" ".join(["*"] * 13))
+            print 
+    
     

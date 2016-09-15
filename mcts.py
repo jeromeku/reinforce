@@ -1,16 +1,16 @@
 import numpy as np
+import sys
 import random
 import logging
 import itertools
 import numpy as np
 from collections import namedtuple
+import argparse
 
 import gym
 import tensorflow
 
 from utils import take, partition_points
-
-NUM_ROLLOUTS = 4
 
 LOG_FILE = "./MCTS.log"
 LOG_FMT = "%(name)s %(asctime)s %(levelname)s %(message)s"
@@ -22,13 +22,16 @@ logging_params = { 'format': LOG_FMT,
                    'filemode': 'w',
                    'level': LOG_LEVEL
                  }
-#logging.basicConfig(**logging_params)
-logger = logging.getLogger()
-hdlr = logging.FileHandler(LOG_FILE, mode='w')
+
 formatter = logging.Formatter(LOG_FMT, DATE_FMT)
-hdlr.setFormatter(formatter)
-logger.addHandler(hdlr) 
-logger.setLevel(logging.INFO)
+
+fhdlr = logging.FileHandler(LOG_FILE, mode='w')
+fhdlr.setLevel(logging.DEBUG)
+fhdlr.setFormatter(formatter)
+
+chdlr = logging.StreamHandler(sys.stdout)
+chdlr.setLevel(logging.CRITICAL)
+chdlr.setFormatter(formatter)
 
 class TestEnv(object):
     def __init__(self, name):
@@ -108,6 +111,10 @@ class PongEnv(TestEnv):
         super(PongEnv, self).__init__("Pong-v0")
         self.is_point = False #state for when a point is scored by either player
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.INFO)
+        self.logger.addHandler(chdlr)
+        self.logger.addHandler(fhdlr)
+
     @property
     def games_played(self):
         return len(self.history)
@@ -167,6 +174,9 @@ class Node(object):
         self.children, self.explored_children = [],[]
         self.value, self.visits = 0., 0.
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.INFO)
+        self.logger.addHandler(chdlr)
+        self.logger.addHandler(fhdlr)
 
         if root:
             self.name = "root"
@@ -207,7 +217,10 @@ class MCTS(object):
     def __init__(self, gamma=1):
         self.gamma = gamma
         self.logger = logging.getLogger(self.__class__.__name__)
-
+        self.logger.setLevel(logging.INFO)
+        self.logger.addHandler(chdlr)
+        self.logger.addHandler(fhdlr)
+    
     def ucb(self, node):
         exploit_score = float(node.value) / node.visits
         explore_score = np.sqrt((2 * np.log(node.parent.visits)) / float(node.visits))
@@ -225,7 +238,6 @@ class MCTS(object):
         if node.num_children == 0:
             self.logger.info("expanding {}".format(node.name))
             self.expand(node, env)
-            print 
             
         if node.has_unvisited:
             child = node.get_unvisited()
@@ -299,6 +311,23 @@ class MCTS(object):
             self.logger.info("{}".format(" ".join(["*"] * 13)))
 
 if __name__ == "__main__":
+    
+    global DEBUG
+    global NUM_ROLLOUTS
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action="store_true", help="Output debugging messages")
+    parser.add_argument('--num_rollouts', default=1, help="Number of rollouts to simulate", type=int)
+    args = parser.parse_args()
+    
+    DEBUG = args.debug
+    NUM_ROLLOUTS = args.num_rollouts
+
+    if DEBUG:
+        logging.getLogger().handlers[0].setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().handlers[0].setLevel(logging.ERROR)
+
     pong = PongEnv()
 
     #Initial State
@@ -307,7 +336,7 @@ if __name__ == "__main__":
 
     #Run MCTS
     mcts = MCTS(gamma=1)
-    logger.info("Running {} rollouts".format(NUM_ROLLOUTS))
+    #logging.info("Running {} rollouts".format(NUM_ROLLOUTS))
     for i in range(NUM_ROLLOUTS):
         mcts.select(root, pong)
 

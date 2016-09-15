@@ -1,5 +1,6 @@
 import numpy as np
 import random
+import logging
 import itertools
 import numpy as np
 from collections import namedtuple
@@ -8,6 +9,26 @@ import gym
 import tensorflow
 
 from utils import take, partition_points
+
+NUM_ROLLOUTS = 4
+
+LOG_FILE = "./MCTS.log"
+LOG_FMT = "%(name)s %(asctime)s %(levelname)s %(message)s"
+DATE_FMT = '%m/%d/%Y %I:%M:%S'
+LOG_LEVEL = logging.INFO
+logging_params = { 'format': LOG_FMT,
+                   'datefmt': DATE_FMT,
+                   'filename': LOG_FILE, 
+                   'filemode': 'w',
+                   'level': LOG_LEVEL
+                 }
+#logging.basicConfig(**logging_params)
+logger = logging.getLogger()
+hdlr = logging.FileHandler(LOG_FILE, mode='w')
+formatter = logging.Formatter(LOG_FMT, DATE_FMT)
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr) 
+logger.setLevel(logging.INFO)
 
 class TestEnv(object):
     def __init__(self, name):
@@ -86,7 +107,7 @@ class PongEnv(TestEnv):
     def __init__(self):
         super(PongEnv, self).__init__("Pong-v0")
         self.is_point = False #state for when a point is scored by either player
-
+        self.logger = logging.getLogger(self.__class__.__name__)
     @property
     def games_played(self):
         return len(self.history)
@@ -120,7 +141,7 @@ class PongEnv(TestEnv):
             self.is_terminal = terminal
         
             if abs(reward) > 0:
-                print "point scored"
+                self.logger.info("point scored")
                 self.is_point = True
         
         #Store point path to current game trajectory
@@ -129,7 +150,7 @@ class PongEnv(TestEnv):
 
         #Append entire game trajectory to environment history
         if self.is_terminal:
-            print "End of Game"
+            self.logger.info("End of Game")
             self.history.append(self.trajectory)
             self.clear()
 
@@ -145,7 +166,8 @@ class Node(object):
         self.is_terminal = terminal
         self.children, self.explored_children = [],[]
         self.value, self.visits = 0., 0.
-        
+        self.logger = logging.getLogger(self.__class__.__name__)
+
         if root:
             self.name = "root"
         else:
@@ -160,6 +182,10 @@ class Node(object):
     @property
     def num_children(self):
         return len(self.children)
+    
+    @property
+    def has_children(self):
+        return self.num_children > 0
     
     @property
     def num_explored(self):
@@ -180,6 +206,7 @@ class MCTS(object):
 
     def __init__(self, gamma=1):
         self.gamma = gamma
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def ucb(self, node):
         exploit_score = float(node.value) / node.visits
@@ -196,13 +223,13 @@ class MCTS(object):
     def select(self, node, env):
         #Expand if new state (and not terminal)
         if node.num_children == 0:
-            print "expanding {}".format(node.name)
+            self.logger.info("expanding {}".format(node.name))
             self.expand(node, env)
             print 
             
         if node.has_unvisited:
             child = node.get_unvisited()
-            print "exploring child {}".format(child.name)
+            self.logger.info("exploring child {}".format(child.name))
             
             #Simulate
             action = child.action
@@ -215,23 +242,23 @@ class MCTS(object):
             
             #Point scored, no need to reset
             if env.is_point:
-                print "Point scored"
+                self.logger.info("Point scored")
 
             #End of game reached, reset game
             if env.is_terminal:
-                print "Gameover"
+                self.logger.info("Gameover")
                 env.clear()
         else:
             #Run bandit selection algorithm if expanded and all children visited at least once
             ucb_scores = map(self.ucb, node.children)
             best_child = np.argmax(ucb_scores)
             selected = node.children[best_child]
-            print "all children visited, running bandit"
-            print "selected child ", best_child + 1
+            self.logger.info("all children visited, running bandit")
+            self.logger.info("selected child {}".format(best_child + 1))
             self.select(selected, env)
 
     def simulate(self, node, env, max_points=None):
-        print "simulating..."
+        self.logger.info("simulating...")
 
         #Initial step following expansion
         a = node.action
@@ -262,14 +289,26 @@ class MCTS(object):
     def backprop(self, reward, node):
                 
         #Update stats starting until root
-        print "backpropagating..."
+        self.logger.info("backpropagating...")
         node.visits += 1
         node.value += reward
         if not node.is_root:
             self.backprop(self.gamma*reward, node.parent)
         else:
-            print "reached root"
-            print "{}".format(" ".join(["*"] * 13))
-            print 
-    
+            self.logger.info("reached root")
+            self.logger.info("{}".format(" ".join(["*"] * 13)))
+
+if __name__ == "__main__":
+    pong = PongEnv()
+
+    #Initial State
+    init_state = pong.state
+    root = Node(state=init_state, root=True)
+
+    #Run MCTS
+    mcts = MCTS(gamma=1)
+    logger.info("Running {} rollouts".format(NUM_ROLLOUTS))
+    for i in range(NUM_ROLLOUTS):
+        mcts.select(root, pong)
+
     

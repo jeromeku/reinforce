@@ -29,9 +29,9 @@ fhdlr = logging.FileHandler(LOG_FILE, mode='w')
 fhdlr.setLevel(logging.DEBUG)
 fhdlr.setFormatter(formatter)
 
-chdlr = logging.StreamHandler(sys.stdout)
-chdlr.setLevel(logging.CRITICAL)
-chdlr.setFormatter(formatter)
+# chdlr = logging.StreamHandler(sys.stdout)
+# chdlr.setLevel(logging.CRITICAL)
+# chdlr.setFormatter(formatter)
 
 class TestEnv(object):
     def __init__(self, name):
@@ -112,7 +112,7 @@ class PongEnv(TestEnv):
         self.is_point = False #state for when a point is scored by either player
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
-        self.logger.addHandler(chdlr)
+        # self.logger.addHandler(chdlr)
         self.logger.addHandler(fhdlr)
 
     @property
@@ -175,7 +175,7 @@ class Node(object):
         self.value, self.visits = 0., 0.
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
-        self.logger.addHandler(chdlr)
+        # self.logger.addHandler(chdlr)
         self.logger.addHandler(fhdlr)
 
         if root:
@@ -218,7 +218,7 @@ class MCTS(object):
         self.gamma = gamma
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
-        self.logger.addHandler(chdlr)
+        # self.logger.addHandler(chdlr)
         self.logger.addHandler(fhdlr)
     
     def ucb(self, node):
@@ -312,9 +312,6 @@ class MCTS(object):
 
 if __name__ == "__main__":
     
-    global DEBUG
-    global NUM_ROLLOUTS
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action="store_true", help="Output debugging messages")
     parser.add_argument('--num_rollouts', default=1, help="Number of rollouts to simulate", type=int)
